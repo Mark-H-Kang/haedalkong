@@ -1,3 +1,5 @@
+import { templates } from './membership.mjs';
+
 const actions = new Map([
   ['NEWMEM', { kind: 'join', feed: '4' }],
   ['DELMEM', { kind: 'leave', feed: '2' }],
@@ -5,13 +7,6 @@ const actions = new Map([
 ]);
 
 export const maxFrameBytes = 1024 * 1024;
-export const templates = Object.freeze({
-  join: '👋 {name}님, 환영합니다!',
-  rejoin: '👋 {name}님, 다시 오신 것을 환영합니다!',
-  leave: '👋 {name}님이 퇴장하셨습니다.',
-  kick: '👋 {name}님이 강제 퇴장되었습니다.',
-});
-
 export function id(value) {
   if (typeof value !== 'string' || !/^[1-9][0-9]{0,18}$/.test(value) ||
       BigInt(value) > 9223372036854775807n) throw Error('invalid-id');
@@ -25,8 +20,8 @@ function exact(text) {
 
 function nickname(value) {
   if (value == null || value === '') return null;
-  if (typeof value !== 'string' || value.length > 120 ||
-      /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(value)) {
+  if (typeof value !== 'string' || value.length > 120 || !value.isWellFormed() ||
+      /[\u0000-\u001f\u007f-\u009f\u200b-\u200c\u200e-\u200f\u2028-\u202e\u2066-\u2069]/u.test(value)) {
     throw Error('invalid-nickname');
   }
   return value;
@@ -65,9 +60,10 @@ export function loadConfig(text) {
     const custom = options.templates ?? {};
     if (typeof custom !== 'object' || Array.isArray(custom)) throw Error('invalid-template');
     for (const [kind, value] of Object.entries(custom)) {
-      if (!Object.hasOwn(templates, kind) || typeof value !== 'string' || !value.trim() ||
+      if ((kind !== 'kick' && !Object.hasOwn(templates, kind)) || typeof value !== 'string' || !value.trim() ||
           value.length > 400 || /[{}]/u.test(value.replaceAll('{name}', ''))) throw Error('invalid-template');
     }
+    if (/강제\s*퇴장|강퇴/u.test(custom.leave ?? '')) throw Error('invalid-exit-template');
     const { profileRef, verificationRef } = options;
     if (config.liveEnabled && ![profileRef, verificationRef].every(value =>
       typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value))) throw Error('unverified-binding');

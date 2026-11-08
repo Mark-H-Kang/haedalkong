@@ -12,11 +12,11 @@ if (live) args.shift();
 
 async function run() {
   const valid = live
-    ? { ingest: 1, backfill: 1, status: 0, dispatch: 0, resume: 0, resolve: 2 }
-    : { replay: 1, status: 0, resume: 0 };
+    ? { ingest: 1, backfill: 1, status: 0, dispatch: 0, resume: 0, resolve: 2, migrate: 0 }
+    : { replay: 1, backfill: 1, status: 0, resume: 0, migrate: 0 };
   if (!Object.hasOwn(valid, command) || args.length !== valid[command]) throw Error('invalid-command');
   const config = loadConfig(readFileSync(join(root, 'config.local.json'), 'utf8'));
-  if (live && !config.liveEnabled) throw Error('live-disabled');
+  if (live && !config.liveEnabled && command !== 'migrate') throw Error('live-disabled');
   const dir = join(root, 'var');
   try {
     mkdirSync(dir);
@@ -25,9 +25,10 @@ async function run() {
   }
   if (!lstatSync(dir).isDirectory() || realpathSync(dir) !== dir) throw Error('unsafe-data-directory');
   const isStopped = () => live && stopped(join(dir, 'STOP'));
-  if (['backfill', 'resolve', 'resume'].includes(command) && live && !isStopped()) throw Error('stop-required');
+  if (['backfill', 'resolve', 'resume', 'migrate'].includes(command) && live && !isStopped()) throw Error('stop-required');
   if (['ingest', 'dispatch'].includes(command) && isStopped()) throw Error('stop-active');
-  const store = new Store(join(dir, live ? 'live.sqlite' : 'replay.sqlite'), config.rooms, { live });
+  const store = new Store(join(dir, live ? 'live.sqlite' : 'replay.sqlite'), config.rooms,
+    { live, migrate: command === 'migrate' });
   try {
     switch (command) {
       case 'replay':
@@ -36,7 +37,7 @@ async function run() {
         if (command !== 'backfill' && (store.halted || store.unresolved().length)) throw Error('store-halted');
         const input = args[0] === '-' ? process.stdin : createReadStream(args[0]);
         return await ingest(store, input, { backfill: command === 'backfill',
-          isStopped: command === 'backfill' ? () => !isStopped() : isStopped });
+          isStopped: live && command === 'backfill' ? () => !isStopped() : isStopped });
       }
       case 'dispatch':
         return await dispatch(store, writerClient(process.env.OPENCHAT_WRITER_URL, process.env.OPENCHAT_WRITER_TOKEN),
@@ -49,6 +50,8 @@ async function run() {
         return { resumed: true };
       case 'status':
         return store.status();
+      case 'migrate':
+        return { migrated: Boolean(store.migrationBackup), backup: store.migrationBackup ?? null };
     }
   } finally {
     store.close();

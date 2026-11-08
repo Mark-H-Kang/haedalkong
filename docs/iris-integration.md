@@ -12,6 +12,8 @@
 
 시스템 행의 `json.type`은 0입니다. 행 `id`는 중복 식별, `_id`는 정렬 및 복구에 사용합니다. [Iris 공개 문서의 프레임 및 응답 구조](https://github.com/dolidolih/Iris#api-%EB%A0%88%ED%8D%BC%EB%9F%B0%EC%8A%A4)
 
+Iris의 공개 WebSocket 계약은 채팅 로그 프레임을 설명합니다. 방별 구성원 조회는 현재 이름을 반환하며, 공개 Iris 봇 예제는 닉네임을 주기적으로 조회해 변화를 비교합니다. 신뢰할 수 있는 독립 닉네임 변경 이벤트는 이 자료에서 확인되지 않았습니다. 해달콩은 입퇴장 프레임의 확인된 이름만 기록합니다. [Iris WebSocket 계약](https://github.com/dolidolih/Iris#websocket-%EC%97%94%EB%93%9C%ED%8F%AC%EC%9D%B8%ED%8A%B8) · [Iris 닉네임 비교 예제](https://github.com/dolidolih/iris_bot/blob/main/bots/detect_nickname_change.py#L327-L437)
+
 현재 공유 환경의 발송 권한은 운영 본방에 고정되어 있습니다. Iris와 발송 관리기를 공유하려면 기존 본방 권한을 보존한 채 해달콩과 신규 방을 별도 주체로 등록하는 승인 절차가 필요합니다. 해달콩은 방 필터를 통과한 JSONL을 읽고 전용 발송 접수 경로를 호출합니다. 실운영 수신 릴레이와 발송 관리기 서버 연결은 별도 승인 단계입니다.
 
 ## 공용 환경 연결 계약
@@ -25,7 +27,7 @@
 
 ## 활성화 후 명령
 
-모든 `--live` 명령에는 검증된 `config.local.json`이 필요합니다. 운영 입력 파일이나 표준 입력은 접근 권한이 제한된 승인 릴레이에서만 받습니다. 승인되지 않은 채팅방의 전체 피드를 로컬 파일로 덤프하지 않습니다.
+`migrate`를 제외한 `--live` 명령에는 운영을 활성화한 검증된 `config.local.json`이 필요합니다. 운영 입력 파일이나 표준 입력은 접근 권한이 제한된 승인 릴레이에서만 받습니다. 승인되지 않은 채팅방의 전체 피드를 로컬 파일로 덤프하지 않습니다.
 
 ```powershell
 node src/cli.mjs ingest --live approved-frames.jsonl
@@ -41,3 +43,10 @@ node src/cli.mjs dispatch --live
 2. `status --live`로 체크포인트와 미확정 접수를 확인합니다. 관리기의 영수증과 큐 상태를 조회해 `node src/cli.mjs resolve --live <key> accepted` 또는 `discarded`로 기록합니다. 결과를 입증할 수 없으면 보류하고, 같은 키를 자동 재전송하지 않습니다.
 3. 승인된 원본에서 누락된 프레임을 확보한 뒤 `node src/cli.mjs backfill --live recovered.jsonl`을 실행합니다. 늦게 도착한 프레임은 회원별 순서대로 이력을 다시 계산합니다. 새 발송은 생성하지 않고, 이력을 보정한 방의 기존 대기 알림은 폐기합니다. 서로 다른 이벤트가 동일 순번을 사용하면 운영자 확인이 필요합니다.
 4. 이력과 관리기 상태를 확인한 뒤 STOP이 있는 상태에서 `node src/cli.mjs resume --live`를 실행합니다. 이어 신규 프로젝트 STOP을 해제하고 승인된 릴레이와 발송 작업을 재개합니다. 기존 칠갑산봇의 STOP, 프로세스, DB는 이 절차의 작업 대상에서 제외합니다.
+
+## DB 마이그레이션
+
+1. 해달콩의 입력·발송 작업을 중지하고, 운영 DB는 해달콩의 `var/STOP`을 만듭니다. 이미 발송 관리기에 접수된 작업이 있다면 해달콩 큐만 보류합니다.
+2. 리플레이 DB는 `node src/cli.mjs migrate`, 운영 DB는 `node src/cli.mjs migrate --live`로 업그레이드합니다. SQLite 버전은 리플레이 `1 → 3`, 운영 `2 → 4`입니다. 쓰기를 예약한 상태에서 커밋된 DB 스냅샷을 `var/<파일명>.backup-*/before-migration.sqlite`에 만들고 버전과 무결성을 확인한 뒤 원본을 트랜잭션 안에서 마이그레이션합니다. 이력과 기존 발송 상태가 든 백업은 운영 계정만 접근할 수 있는 곳에 보관합니다.
+3. 기존 프레임을 순서대로 읽어 회원 집계와 닉네임 이력을 재구성합니다. 원본 프레임, 체크포인트, 방 승인 정보, 기존 접수 기록은 보존합니다. 구형 알림 본문이 발송되지 않도록 대기 알림만 `discarded`로 전환합니다. `sending`이나 `uncertain` 상태는 위 장애 절차에 따라 확인합니다.
+4. 작업이 실패하면 SQLite 트랜잭션을 롤백합니다. 작업 결과와 백업을 확인할 때까지 해달콩을 중지 상태로 유지합니다. 리플레이 DB는 `status`로 확인할 수 있습니다. 운영 DB를 이미 사용 중인 환경에서는 해달콩 전용 승인 절차에 따라 재개합니다.
