@@ -151,7 +151,8 @@ test('STOP, expiry, and accepted receipt prevent unintended or repeated delivery
   assert.equal(sent[0].profileRef, OPTIONS.profileRef);
   assert.equal(sent[0].roomId, ROOM);
   assert.match(sent[0].key, /^haedalkong-v1:/);
-  assert.equal(sent[0].expiresAt, NOW + 120);
+  assert.equal(sent[0].expiresAt, NOW + 110);
+  assert.ok(sent[0].expiresAt - (NOW - 5) <= 120, 'Iris accepts the expiry with a five-second slower Android clock');
   f.reopen();
   assert.deepEqual(await dispatch(f.store, send, () => false, () => NOW), { accepted: 0 });
   assert.equal(sent.length, 1);

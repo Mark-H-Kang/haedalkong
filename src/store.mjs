@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { maxNoticeLength, projectMember, renderNotice } from './membership.mjs';
 
 const applicationId = 0x4f4d4231;
+// Leave headroom below Iris's 120-second ceiling for Windows/Android clock skew.
+const noticeTtlSeconds = 110;
 const schema = `
   CREATE TABLE control (id INTEGER PRIMARY KEY CHECK (id = 1), halted INTEGER NOT NULL);
   INSERT INTO control VALUES (1, 0);
@@ -198,37 +200,40 @@ export class Store {
   }
 
   apply(batch, { backfill = false } = {}) {
+    return this.transaction(() => this.applyInTransaction(batch, { backfill }));
+  }
+
+  applyInTransaction(batch, { backfill = false } = {}) {
     if (!batch || !this.rooms.has(batch.room)) return 'ignored';
     const { room, event, sequence, seconds, kind, members } = batch;
     const digest = createHash('sha256').update(JSON.stringify([sequence, seconds, kind, members])).digest('hex');
-    return this.transaction(() => {
-      if (this.halted && !backfill) throw Error('store-halted');
-      const old = this.db.prepare('SELECT digest FROM frames WHERE room = ? AND event = ?').get(room, event);
-      if (old) {
-        if (old.digest !== digest) throw Error('event-conflict');
-        return 'duplicate';
+    if (!this.db.isTransaction) throw Error('relay-transaction-required');
+    if (this.halted && !backfill) throw Error('store-halted');
+    const old = this.db.prepare('SELECT digest FROM frames WHERE room = ? AND event = ?').get(room, event);
+    if (old) {
+      if (old.digest !== digest) throw Error('event-conflict');
+      return 'duplicate';
+    }
+    const cursor = this.db.prepare('SELECT sequence FROM cursors WHERE room = ?').get(room);
+    const late = cursor && BigInt(sequence) <= BigInt(cursor.sequence);
+    if (late && (!backfill || this.db.prepare('SELECT 1 FROM frames WHERE room = ? AND sequence = ?')
+      .get(room, sequence))) throw Error('sequence-conflict-or-late');
+    this.db.prepare('INSERT INTO frames VALUES (?, ?, ?, ?, ?, ?)').run(room, event, sequence, digest, seconds, kind);
+    for (const member of members) {
+      if (late) {
+        this.db.prepare('INSERT INTO history VALUES (?, ?, ?, ?, NULL)').run(room, event, member.id, member.name);
+        this.reproject(room, member.id);
+      } else {
+        this.applyMember(batch, member, backfill);
       }
-      const cursor = this.db.prepare('SELECT sequence FROM cursors WHERE room = ?').get(room);
-      const late = cursor && BigInt(sequence) <= BigInt(cursor.sequence);
-      if (late && (!backfill || this.db.prepare('SELECT 1 FROM frames WHERE room = ? AND sequence = ?')
-        .get(room, sequence))) throw Error('sequence-conflict-or-late');
-      this.db.prepare('INSERT INTO frames VALUES (?, ?, ?, ?, ?, ?)').run(room, event, sequence, digest, seconds, kind);
-      for (const member of members) {
-        if (late) {
-          this.db.prepare('INSERT INTO history VALUES (?, ?, ?, ?, NULL)').run(room, event, member.id, member.name);
-          this.reproject(room, member.id);
-        } else {
-          this.applyMember(batch, member, backfill);
-        }
-      }
-      if (backfill) this.db.prepare("UPDATE outbox SET state = 'discarded' WHERE room = ? AND state = 'pending'").run(room);
-      if (late) return 'applied';
-      this.db.prepare(`
-        INSERT INTO cursors VALUES (?, ?)
-        ON CONFLICT (room) DO UPDATE SET sequence = excluded.sequence
-      `).run(room, sequence);
-      return 'applied';
-    });
+    }
+    if (backfill) this.db.prepare("UPDATE outbox SET state = 'discarded' WHERE room = ? AND state = 'pending'").run(room);
+    if (late) return 'applied';
+    this.db.prepare(`
+      INSERT INTO cursors VALUES (?, ?)
+      ON CONFLICT (room) DO UPDATE SET sequence = excluded.sequence
+    `).run(room, sequence);
+    return 'applied';
   }
 
   applyMember({ room, event, kind, seconds }, { id, name }, backfill) {
@@ -245,7 +250,7 @@ export class Store {
     const body = renderNotice(state, this.rooms.get(room).templates, previous?.name, recent);
     if (body.length > maxNoticeLength) throw Error('rendered-message-too-long');
     this.db.prepare("INSERT INTO outbox VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL)")
-      .run(key, room, event, id, body, seconds + 120);
+      .run(key, room, event, id, body, seconds + noticeTtlSeconds);
   }
 
   saveMember(room, id, state) {

@@ -14,7 +14,19 @@
 
 Iris의 공개 WebSocket 계약은 채팅 로그 프레임을 설명합니다. 방별 구성원 조회는 현재 이름을 반환하며, 공개 Iris 봇 예제는 닉네임을 주기적으로 조회해 변화를 비교합니다. 신뢰할 수 있는 독립 닉네임 변경 이벤트는 이 자료에서 확인되지 않았습니다. 해달콩은 입퇴장 프레임의 확인된 이름만 기록합니다. [Iris WebSocket 계약](https://github.com/dolidolih/Iris#websocket-%EC%97%94%EB%93%9C%ED%8F%AC%EC%9D%B8%ED%8A%B8) · [Iris 닉네임 비교 예제](https://github.com/dolidolih/iris_bot/blob/main/bots/detect_nickname_change.py#L327-L437)
 
-현재 공유 환경의 발송 권한은 운영 본방에 고정되어 있습니다. Iris와 발송 관리기를 공유하려면 기존 본방 권한을 보존한 채 해달콩과 신규 방을 별도 주체로 등록하는 승인 절차가 필요합니다. 해달콩은 방 필터를 통과한 JSONL을 읽고 전용 발송 접수 경로를 호출합니다. 실운영 수신 릴레이와 발송 관리기 서버 연결은 별도 승인 단계입니다.
+배포된 Iris의 기존 `/reply` 권한은 운영 본방에 고정되어 있습니다. 해달콩 후보는 별도의 `/reply/haedalkong`과 Windows 전용 접수 서버를 사용합니다. 기존 경로와 토큰을 유지하며, 새 경로에는 해달콩 방 지문·프로필 참조·승인 기록·별도 토큰이 필요합니다.
+
+## 상시 관찰과 발송 후보
+
+- `node src/cli.mjs observe`는 `liveEnabled: false` 상태에서 확인한 단일 방만 관찰합니다. `observe-status`로 체크포인트와 집계를 확인합니다. `var/observe.sqlite`에 저장하며 발송 접수를 하지 않습니다.
+- WebSocket은 즉시 조회 신호로 쓰고, 같은 방의 원본 행만 조회해 기존 체크포인트와 대조합니다. 재연결 시 원본으로 확인한 입퇴장은 이력에 반영하되 발송하지 않습니다. 체크포인트가 사라지거나 한 번에 1,000건을 초과하면 안전 중단합니다. 일반 채팅 본문은 조회하지 않습니다.
+- 배포 검증 후 `gateway --live`와 `relay --live`를 별도 작업으로 관리합니다. `CHILGAP_MAIN_BINDING`과 `CHILGAP_GLOBAL_STOP`에는 기존 본방 바인딩과 STOP의 절대 경로를 지정합니다. 해달콩은 이 파일을 읽습니다. 해달콩만 멈출 때는 해달콩의 `var/STOP`을 사용합니다.
+- `HAEDALKONG_GATEWAY_PORT`는 Windows 루프백 접수 포트, `HAEDALKONG_IRIS_PORT`는 기존 Iris 포트입니다. `OPENCHAT_WRITER_TOKEN`은 릴레이→접수용, `HAEDALKONG_IRIS_TOKEN`은 접수→Iris 및 Iris→발송 직전 확인용입니다. 모두 별도로 생성하고 보호된 실행 환경에서 주입합니다.
+- Iris 후보에는 `IRIS_HAEDALKONG_TOKEN`, `IRIS_HAEDALKONG_ROOM`, `IRIS_HAEDALKONG_ROOM_SHA256`, `IRIS_HAEDALKONG_PROFILE`, `IRIS_HAEDALKONG_PROOF`, `IRIS_HAEDALKONG_CALLBACK_PORT`가 필요합니다. 콜백은 전용 ADB reverse 매핑을 통해 Windows 루프백 서버에만 도달합니다. 콜백은 SQLite의 발송 클레임을 한 번만 승인하고 STOP, 만료, 방과 승인 기록을 다시 확인합니다. 기존 Iris 공용 큐의 발송 간격을 따르며 해달콩에 10분 3건, 24시간 12건의 별도 한도를 적용합니다.
+- `var/live.sqlite`는 회원 이력과 봇 Outbox, `var/writer.sqlite`는 접수와 Iris 발송 시도의 상태를 담습니다. `submitted`는 Android 발송 요청이 제출됐다는 뜻입니다. 카카오톡 수신은 별도 계정에서 확인합니다. 불명확한 요청은 재전송하지 않으며, 이어지는 발송은 상태를 확인할 때까지 보류됩니다.
+- 첫 시험 발송은 `liveEnabled: false` 상태에서 `gateway-probe`로 제한할 수 있습니다. `HAEDALKONG_PROBE_KEY`와 `HAEDALKONG_PROBE_TEXT`에 승인된 시험 키와 문구를 고정합니다. 시험 전용 `var/probe-writer.sqlite`가 그 키를 보존하며, 일반 회원 알림은 발송하지 않습니다.
+
+후보 반영 전 기존 APK와 운영 SQLite·Outbox 백업을 검증합니다. 기존 작성기는 Iris WebSocket 재접속 횟수가 제한되어 있으므로, Iris 교체·복구와 함께 기존 작성기의 재연결 또는 재가동 절차까지 리허설해야 합니다. 실장비에서는 양쪽 토큰의 교차 발송 차단을 먼저 확인하고, 별도 계정의 실제 수신과 발신 프로필, STOP, 기존 응답과 토너 스케줄러를 확인한 뒤 해달콩 자동 발송을 켭니다.
 
 ## 공용 환경 연결 계약
 
