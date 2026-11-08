@@ -98,6 +98,31 @@ test('an ambiguous Iris dispatch holds the durable queue across reopen and does 
   } finally { gateway.db.close(); }
 });
 
+test('Gateway sends beyond both old quotas while keeping a single claim and discarding expired work', async t => {
+  let now = 1794096000;
+  let sent = 0;
+  const gateway = new Gateway(join(workspace(t), 'writer.sqlite'), {
+    mainRoom, rooms, token: inbound, irisToken: iris, clock: () => now, permitted: () => true,
+    send: async payload => {
+      assert.equal(await gateway.sendNext(), false);
+      assert.equal(gateway.authorizeSend(header(iris), payload), 204);
+      sent++;
+    },
+  });
+  try {
+    const payload = event => ({ key: `haedalkong-v1:200:${event}:12`, roomId, profileRef,
+      verificationRef, text: '합성', expiresAt: now + 110 });
+    for (let event = 1; event <= 14; event++) {
+      assert.equal(gateway.accept(header(inbound), payload(event)).status, 202);
+    }
+    for (let i = 0; i < 13; i++) assert.equal(await gateway.sendNext(), true);
+    now += 110;
+    assert.equal(await gateway.sendNext(), false);
+    assert.equal(sent, 13);
+    assert.equal(gateway.db.prepare("SELECT state FROM outbox WHERE key='haedalkong-v1:200:14:12'").get().state, 'expired');
+  } finally { gateway.db.close(); }
+});
+
 test('Iris reads only the requested room and includes sender ID needed for decryption', async () => {
   const read = irisReader(3000, async (url, opts) => {
     assert.equal(url, 'http://127.0.0.1:3000/query');

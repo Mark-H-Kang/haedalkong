@@ -97,7 +97,7 @@ export class Gateway {
       )`).run(key, encoded, receipt);
     const record = this.db.prepare('SELECT payload, receipt, state FROM outbox WHERE key=?').get(key);
     if (!record) return { status: 503 };
-    if (record.payload !== encoded || ['discarded', 'isolated-uncertain'].includes(record.state)) return { status: 409 };
+    if (record.payload !== encoded || ['discarded', 'expired', 'isolated-uncertain'].includes(record.state)) return { status: 409 };
     if (inserted.changes) this.progress('accepted', payload);
     return { status: 202, body: { status: 'accepted', key, roomId, profileRef, receipt: record.receipt } };
   }
@@ -111,22 +111,25 @@ export class Gateway {
     if (!this.permitted()) return false;
     const now = this.clock();
     // Expired pending rows do not consume quota.
-    this.db.prepare(`UPDATE outbox SET state='discarded' WHERE state='pending'
+    this.db.prepare(`UPDATE outbox SET state='expired' WHERE state='pending'
       AND json_extract(payload, '$.expiresAt') <= ?`).run(now);
-    // One durable claim globally. This room shares Iris's existing device-wide pacing and keeps its own budget.
+    // One durable claim globally. Iris still provides device-wide pacing.
     const claim = this.db.prepare(`
       UPDATE outbox SET state='sending', attempted=? WHERE rowid=(
         SELECT rowid FROM outbox WHERE state='pending' ORDER BY rowid LIMIT 1
       ) AND NOT EXISTS (SELECT 1 FROM outbox WHERE state IN ('sending', 'authorized', 'uncertain'))
       AND ? >= COALESCE((SELECT MAX(attempted) FROM outbox), 0)
-      AND (SELECT COUNT(*) FROM outbox WHERE attempted>?)<3
-      AND (SELECT COUNT(*) FROM outbox WHERE attempted>?)<12 RETURNING key, payload
-    `).get(now, now, now - 600, now - 86400);
+      RETURNING key, payload
+    `).get(now, now);
     if (!claim) return false;
     const finish = state => this.db.prepare(
       "UPDATE outbox SET state=? WHERE key=? AND state IN ('sending', 'authorized')"
     ).run(state, claim.key);
     const payload = JSON.parse(claim.payload);
+    if (payload.expiresAt <= this.clock()) {
+      finish('expired');
+      return true;
+    }
     if (payload.key !== claim.key || !this.valid(payload, this.clock()) || !this.permitted()) {
       finish('discarded');
       return true;

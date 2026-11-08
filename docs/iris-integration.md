@@ -22,7 +22,7 @@ Iris의 공개 WebSocket 계약은 채팅 로그 프레임을 설명합니다. �
 - WebSocket은 즉시 조회 신호로 쓰고, 같은 방의 원본 행만 조회해 기존 체크포인트와 대조합니다. 재연결 시 원본으로 확인한 입퇴장은 이력에 반영하되 발송하지 않습니다. 체크포인트가 사라지거나 한 번에 1,000건을 초과하면 안전 중단합니다. 일반 채팅 본문은 조회하지 않습니다.
 - 배포 검증 후 `gateway --live`와 `relay --live`를 별도 작업으로 관리합니다. `CHILGAP_MAIN_BINDING`과 `CHILGAP_GLOBAL_STOP`에는 기존 본방 바인딩과 STOP의 절대 경로를 지정합니다. 해달콩은 이 파일을 읽습니다. 해달콩만 멈출 때는 해달콩의 `var/STOP`을 사용합니다.
 - `HAEDALKONG_GATEWAY_PORT`는 Windows 루프백 접수 포트, `HAEDALKONG_IRIS_PORT`는 기존 Iris 포트입니다. `OPENCHAT_WRITER_TOKEN`은 릴레이→접수용, `HAEDALKONG_IRIS_TOKEN`은 접수→Iris 및 Iris→발송 직전 확인용입니다. 모두 별도로 생성하고 보호된 실행 환경에서 주입합니다.
-- Iris 후보에는 `IRIS_HAEDALKONG_TOKEN`, `IRIS_HAEDALKONG_ROOM`, `IRIS_HAEDALKONG_ROOM_SHA256`, `IRIS_HAEDALKONG_PROFILE`, `IRIS_HAEDALKONG_PROOF`, `IRIS_HAEDALKONG_CALLBACK_PORT`가 필요합니다. 콜백은 전용 ADB reverse 매핑을 통해 Windows 루프백 서버에만 도달합니다. 콜백은 SQLite의 발송 클레임을 한 번만 승인하고 STOP, 만료, 방과 승인 기록을 다시 확인합니다. 기존 Iris 공용 큐의 발송 간격을 따르며 해달콩에 10분 3건, 24시간 12건의 별도 한도를 적용합니다.
+- Iris 후보에는 `IRIS_HAEDALKONG_TOKEN`, `IRIS_HAEDALKONG_ROOM`, `IRIS_HAEDALKONG_ROOM_SHA256`, `IRIS_HAEDALKONG_PROFILE`, `IRIS_HAEDALKONG_PROOF`, `IRIS_HAEDALKONG_CALLBACK_PORT`가 필요합니다. 콜백은 전용 ADB reverse 매핑을 통해 Windows 루프백 서버에만 도달합니다. 콜백은 SQLite의 발송 클레임을 한 번만 승인하고 STOP, 만료, 방과 승인 기록을 다시 확인합니다. Gateway는 한 번에 한 건씩 제출하고 Iris 공용 큐의 발송 간격을 따릅니다. 원본 이벤트의 110초 유효시간이 지나면 대기 알림은 `expired`로 기록됩니다.
 - `var/live.sqlite`는 회원 이력과 봇 Outbox, `var/writer.sqlite`는 접수와 Iris 발송 시도의 상태를 담습니다. `submitted`는 Android 발송 요청이 제출됐다는 뜻입니다. 카카오톡 수신은 별도 계정에서 확인합니다. 불명확한 요청은 재전송하지 않으며, 이어지는 발송은 상태를 확인할 때까지 보류됩니다.
 - 첫 시험 발송은 `liveEnabled: false` 상태에서 `gateway-probe`로 제한할 수 있습니다. `HAEDALKONG_PROBE_KEY`와 `HAEDALKONG_PROBE_TEXT`에 승인된 시험 키와 문구를 고정합니다. 시험 전용 `var/probe-writer.sqlite`가 그 키를 보존하며, 일반 회원 알림은 발송하지 않습니다.
 
