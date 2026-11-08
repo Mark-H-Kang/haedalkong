@@ -1,0 +1,6 @@
+{"json":{"chat_id":"101","id":"201","_id":"301","type":"0","created_at":"1794096000","v":"{\"origin\":\"NEWMEM\"}"},"msg":"{\"feedType\":4,\"members\":[{\"userId\":9007199254740993,\"nickName\":\"테스트\"}]}"}
+{"json":{"chat_id":"101","id":"202","_id":"302","type":"0","created_at":"1794096001","v":"{\"origin\":\"DELMEM\"}"},"msg":"{\"feedType\":2,\"member\":{\"userId\":9007199254740993,\"nickName\":\"테스트\"}}"}
+{"json":{"chat_id":"101","id":"203","_id":"303","type":"0","created_at":"1794096002","v":"{\"origin\":\"NEWMEM\"}"},"msg":"{\"feedType\":4,\"members\":[{\"userId\":9007199254740993,\"nickName\":\"테스트\"}]}"}
+{"json":{"chat_id":"101","id":"204","_id":"304","type":"0","created_at":"1794096003","v":"{\"origin\":\"KICKMEM\"}"},"msg":"{\"feedType\":6,\"member\":{\"userId\":9007199254740993,\"nickName\":\"테스트\"}}"}
+{"json":{"chat_id":"101","id":"204","_id":"304","type":"0","created_at":"1794096003","v":"{\"origin\":\"KICKMEM\"}"},"msg":"{\"feedType\":6,\"member\":{\"userId\":9007199254740993,\"nickName\":\"테스트\"}}"}
+{"json":{"chat_id":"999","id":"201","_id":"301","type":"0","created_at":"1794096000","v":"{\"origin\":\"NEWMEM\"}"},"msg":"{\"feedType\":4,\"members\":[{\"userId\":9007199254740993,\"nickName\":\"테스트\"}]}"}

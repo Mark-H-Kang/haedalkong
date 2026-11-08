@@ -1,0 +1,11 @@
+{
+  "liveEnabled": false,
+  "rooms": {
+    "101": {
+      "templates": {
+        "join": "👋 {name}님, 환영합니다!",
+        "rejoin": "👋 {name}님, 다시 오신 것을 환영합니다!"
+      }
+    }
+  }
+}
