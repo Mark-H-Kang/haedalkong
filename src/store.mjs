@@ -166,6 +166,9 @@ export class Store {
       if (!saved) insert.run(room, profileRef, verificationRef);
       else if (saved.profile !== profileRef || saved.proof !== verificationRef) throw Error('binding-changed');
     }
+    if (this.db.prepare('SELECT room FROM bindings').all().some(({ room }) => !this.rooms.has(room))) {
+      throw Error('database-room-mismatch');
+    }
   }
 
   get halted() {

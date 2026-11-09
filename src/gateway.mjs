@@ -66,6 +66,8 @@ export class Gateway {
           state TEXT NOT NULL, attempted INTEGER);
         CREATE INDEX writer_attempts ON outbox(attempted);
         PRAGMA application_id=${appId}; PRAGMA user_version=1; COMMIT;`);
+      if (this.db.prepare("SELECT DISTINCT json_extract(payload, '$.roomId') AS room FROM outbox")
+        .all().some(({ room }) => !rooms.has(room))) throw Error('writer-room-mismatch');
     } catch (error) {
       this.db.close();
       throw error;

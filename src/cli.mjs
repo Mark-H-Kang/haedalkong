@@ -8,6 +8,7 @@ import { Store } from './store.mjs';
 import { dispatch, ingest, stopped, writerClient } from './runtime.mjs';
 import { Gateway, gatewayServer, irisSender, secret } from './gateway.mjs';
 import { Relay, runRelay } from './relay.mjs';
+import { selectRoomLane } from './room-lane.mjs';
 
 const root = realpathSync(dirname(fileURLToPath(new URL('../package.json', import.meta.url))));
 const [command, ...args] = process.argv.slice(2);
@@ -21,15 +22,16 @@ async function run() {
   if (!Object.hasOwn(valid, command) || args.length !== valid[command]) throw Error('invalid-command');
   const configPath = join(root, 'config.local.json');
   const config = loadConfig(readFileSync(configPath, 'utf8'));
+  const lane = selectRoomLane(config, process.env.HAEDALKONG_ROOM_ID);
   if (live && !config.liveEnabled && command !== 'migrate') throw Error('live-disabled');
-  const dir = join(root, 'var');
-  try {
-    mkdirSync(dir);
-  } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
+  const baseDir = join(root, 'var');
+  const dir = lane.room === lane.primary ? baseDir : join(baseDir, lane.room);
+  for (const path of new Set([baseDir, dir])) {
+    try { mkdirSync(path); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    if (!lstatSync(path).isDirectory() || realpathSync(path) !== path) throw Error('unsafe-data-directory');
   }
-  if (!lstatSync(dir).isDirectory() || realpathSync(dir) !== dir) throw Error('unsafe-data-directory');
-  const isStopped = () => live && stopped(join(dir, 'STOP'));
+  const roomStop = () => stopped(join(dir, 'STOP')) || stopped(join(baseDir, `STOP-${lane.room}`));
+  const isStopped = () => live && (roomStop() || stopped(join(baseDir, 'STOP')));
   if (['backfill', 'resolve', 'resume', 'migrate'].includes(command) && live && !isStopped()) throw Error('stop-required');
   if (['ingest', 'dispatch'].includes(command) && isStopped()) throw Error('stop-active');
   if (['gateway', 'relay', 'observe', 'observe-status', 'gateway-probe'].includes(command)) {
@@ -49,16 +51,17 @@ async function run() {
         const mainPid = Number(readFileSync(mainPidFile, 'utf8').trim());
         if (!Number.isSafeInteger(mainPid) || mainPid < 1 || mainPid === process.pid) return false;
         process.kill(mainPid, 0);
-        return !stopped(join(dir, 'STOP')) && !stopped(mainStop) && current.liveEnabled === !(observing || probing) &&
-          current.rooms.size === 1 &&
-          current.rooms.size === config.rooms.size && [...config.rooms].every(([room, binding]) =>
+        const currentLane = selectRoomLane(current, lane.room);
+        return !roomStop() && !stopped(join(baseDir, 'STOP')) && !stopped(mainStop) &&
+          current.liveEnabled === !(observing || probing) && currentLane.primary === lane.primary &&
+          !current.rooms.has(main.roomId) && [...lane.rooms].every(([room, binding]) =>
             current.rooms.get(room)?.profileRef === binding.profileRef &&
             current.rooms.get(room)?.verificationRef === binding.verificationRef) &&
           mainPermit.enabled === true && mainPermit.roomFingerprint === main.fingerprint;
       } catch { return false; }
     };
-    if (config.rooms.size !== 1 || config.rooms.has(main.roomId) || !permitted()) throw Error('service-scope-unverified');
-    if ((observing || probing) && ![...config.rooms.values()].every(({ profileRef, verificationRef }) =>
+    if (config.rooms.has(main.roomId) || !permitted()) throw Error('service-scope-unverified');
+    if ((observing || probing) && ![...lane.rooms.values()].every(({ profileRef, verificationRef }) =>
       [profileRef, verificationRef].every(value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value)))) {
       throw Error('unverified-observation-room');
     }
@@ -67,7 +70,7 @@ async function run() {
     const irisPort = Number(process.env.HAEDALKONG_IRIS_PORT ?? 3000);
     if (command === 'relay' || observing) {
       const send = observing ? undefined : writerClient(process.env.OPENCHAT_WRITER_URL, process.env.OPENCHAT_WRITER_TOKEN);
-      const store = new Store(join(dir, observing ? 'observe.sqlite' : 'live.sqlite'), config.rooms, { live });
+      const store = new Store(join(dir, observing ? 'observe.sqlite' : 'live.sqlite'), lane.rooms, { live });
       try {
         const relay = new Relay(store);
         if (command === 'observe-status') return { anchored: Boolean(relay.cursor()), ...store.status() };
@@ -83,7 +86,7 @@ async function run() {
     if (probe && (!probe.key || !probe.text)) throw Error('probe-binding-required');
     let ready = false;
     const gateway = new Gateway(join(dir, probing ? 'probe-writer.sqlite' : 'writer.sqlite'), {
-      mainRoom: main.roomId, rooms: config.rooms, token: process.env.OPENCHAT_WRITER_TOKEN, irisToken,
+      mainRoom: main.roomId, rooms: lane.rooms, token: process.env.OPENCHAT_WRITER_TOKEN, irisToken,
       permitted: () => ready && permitted(), send: irisSender(irisPort, irisToken), probe,
       onProgress: event => console.log(JSON.stringify(event)),
     });
@@ -105,7 +108,7 @@ async function run() {
     }
     return;
   }
-  const store = new Store(join(dir, live ? 'live.sqlite' : 'replay.sqlite'), config.rooms,
+  const store = new Store(join(dir, live ? 'live.sqlite' : 'replay.sqlite'), lane.rooms,
     { live, migrate: command === 'migrate' });
   try {
     switch (command) {

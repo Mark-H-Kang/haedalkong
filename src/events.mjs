@@ -70,5 +70,5 @@ export function loadConfig(text) {
     rooms.set(room, { templates: { ...templates, ...custom }, profileRef, verificationRef });
   }
   if (!rooms.size) throw Error('empty-room-allowlist');
-  return { liveEnabled: config.liveEnabled, rooms };
+  return { liveEnabled: config.liveEnabled, rooms, primaryRoom: config.primaryRoom };
 }
