@@ -9,6 +9,17 @@ const digest = row => createHash('sha256').update(JSON.stringify([
   row.chat_id, row._id, row.id, row.created_at, row.type, row.v, row.message,
 ])).digest('hex');
 
+function matchesAnchor(row, expected) {
+  if (digest(row) === expected) return true;
+  if (row.type !== '1' || row.message !== null || typeof row.v !== 'string') return false;
+  let metadata;
+  try { metadata = JSON.parse(row.v); } catch { return false; }
+  if (!metadata || metadata.origin !== 'MSG' || metadata.modifyRevision !== 0) return false;
+  const { sendUniversalScrapLog, sentUniversalScrapLogVersion, ...prior } = metadata;
+  if (sendUniversalScrapLog !== true || typeof sentUniversalScrapLogVersion !== 'string') return false;
+  return digest({ ...row, v: JSON.stringify(prior) }) === expected;
+}
+
 export function irisReader(port, request = fetch) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('invalid-iris-port');
   return async (room, cursor) => {
@@ -54,7 +65,7 @@ export class Relay {
     const old = this.cursor();
     const rows = await read(this.room, old?.position);
     if (rows.length > windowSize || (!old && rows.length !== 1)) throw Error('relay-window-limit');
-    if (old && (!rows.length || id(rows[0]._id) !== old.position || digest(rows[0]) !== old.digest)) {
+    if (old && (!rows.length || id(rows[0]._id) !== old.position || !matchesAnchor(rows[0], old.digest))) {
       throw Error('relay-anchor-changed');
     }
     let position = 0n;

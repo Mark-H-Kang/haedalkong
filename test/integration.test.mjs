@@ -143,14 +143,16 @@ test('relay retains a lossless anchor, quietly reconciles a reconnect and reject
     return { chat_id: roomId, _id: String(seq), id: String(seq), created_at: '1794096000',
       type: origin === 'MSG' ? '1' : '0', v: JSON.stringify({ origin }), message: JSON.stringify(body) };
   };
-  const first = r(1);
+  const first = { ...r(1), message: null, v: '{"origin":"MSG","modifyRevision":0}' };
+  const preview = { ...first, v: '{"origin":"MSG","modifyRevision":0,"sendUniversalScrapLog":true,"sentUniversalScrapLogVersion":"1"}' };
   const joined = r(2, 'NEWMEM');
   const leave = r(3, 'DELMEM');
   let store = new Store(file, rooms);
   try {
     let relay = new Relay(store);
     assert.equal(await relay.scan(async () => [first]), 0);
-    assert.equal(await relay.scan(async () => [first, joined]), 1);
+    await assert.rejects(relay.scan(async () => [{ ...preview, created_at: '1794096001' }, joined]), /relay-anchor-changed/);
+    assert.equal(await relay.scan(async () => [preview, joined]), 1);
     assert.equal(store.status().outbox.length, 0);
     store.close();
     store = new Store(file, rooms);
